@@ -1,0 +1,168 @@
+"""
+vanilla-gan.py
+"""
+
+"""
+Import Libraries
+"""
+import torch
+import torch.nn as nn
+import torch.optim as optim
+import matplotlib.pyplot as plt
+import numpy as np
+from GeneratorModel import GeneratorModel
+from DiscriminatorModel import DiscriminatorModel
+from helpers import *
+
+"""
+Define constants
+"""
+params = {
+    'NOISE_DIMENSIONS' : 16,
+
+    'TRAINING_DATASET' : 'sprite',
+    'TRAINING_SPRITE_TYPE' : 'grayscale',
+    'TRAINING_SPRITE_CATEGORY' : 'food',
+    'TRAINING_UNIQUES_ONLY' : True,
+
+    'GENERATOR_ADAM_LEARNING_RATE' : 0.002,
+    'GENERATOR_ADAM_BETAS' : (0.5, 0.999),
+    'SHARPEN_GENERATOR_OUTPUT' : False,
+    'SHARPEN_FACTOR' : 4,
+
+    'DISCRIMINATOR_ADAM_LEARNING_RATE': 0.00001,
+    'DISCRIMINATOR_ADAM_BETAS': (0.5, 0.999),
+
+    'NUM_EPOCHS' : 2048*10,
+    'BATCH_SIZE' : 1024
+}
+
+"""
+Initialization
+"""
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print(f'Found device: {device}')
+
+output_folder = generate_output_path()
+
+"""
+Load training data
+"""
+training_data = None
+if params['TRAINING_DATASET'] == 'mnist':
+    training_data = load_mnist_training_data()
+elif params['TRAINING_DATASET'] == 'sprite':
+    training_data = load_pixel_art_training_data(params['TRAINING_SPRITE_TYPE'], params['TRAINING_SPRITE_CATEGORY'])
+else:
+    raise ValueError(f'Invalid dataset "{params["TRAINING_DATASET"]}"')
+assert training_data is not None
+
+# Additionally make sure data is in the correct format to be passed to the model
+if params['TRAINING_DATASET'] == 'sprite' and params['TRAINING_UNIQUES_ONLY']:
+    training_data = np.unique(training_data, axis=0)
+if params['TRAINING_SPRITE_TYPE'] == 'rgb':
+    training_data = torch.tensor(training_data).to(device).permute(0, 3, 1, 2)
+if params['TRAINING_SPRITE_TYPE'] == 'grayscale':
+    training_data = torch.tensor(training_data).to(device).unsqueeze(1)
+
+"""
+Instantiate generator and discriminator
+"""
+NUM_CHANNELS = 1 if params['TRAINING_SPRITE_TYPE'] == 'grayscale' else 3
+generator_model = GeneratorModel(
+    noise_dims=params['NOISE_DIMENSIONS'],
+    channels=NUM_CHANNELS,
+    generated_image_size=16 if params['TRAINING_DATASET'] == 'sprite' else 28,
+    sharpen_output=params['SHARPEN_GENERATOR_OUTPUT'],
+    sharpen_factor=params['SHARPEN_FACTOR'],
+).to(device)
+discriminator_model = DiscriminatorModel(
+    channels=NUM_CHANNELS
+).to(device)
+
+criterion = nn.BCEWithLogitsLoss()
+
+generator_optimizer = optim.Adam(
+    generator_model.parameters(),
+    lr=params['GENERATOR_ADAM_LEARNING_RATE'],
+    betas=params['GENERATOR_ADAM_BETAS']
+)
+discriminator_optimizer = optim.Adam(
+    discriminator_model.parameters(),
+    lr=params['DISCRIMINATOR_ADAM_LEARNING_RATE'],
+    betas=params['DISCRIMINATOR_ADAM_BETAS']
+)
+
+"""
+Load training data into DataLoader
+"""
+train_loader = torch.utils.data.DataLoader(
+    training_data,
+    batch_size=params['BATCH_SIZE'],
+    shuffle=True
+)
+
+"""
+Execute Training Loop
+"""
+discriminator_losses = []
+generator_losses = []
+
+# Loop for specified number of epochs
+for epoch in range(params['NUM_EPOCHS']):
+    cumulative_gen_loss = 0
+    cumulative_dis_loss = 0
+    for batch_index, batch in enumerate(train_loader):
+        # Get and normalized batch data
+        real_images = batch
+        real_images = real_images.to(device).float()
+
+        # Pass real data through discriminator
+        discriminator_optimizer.zero_grad()
+        real_labels = torch.ones(real_images.size(0), 1, device=device)
+        real_outputs = discriminator_model(real_images)
+        real_loss = criterion(real_outputs, real_labels)
+        real_loss.backward()
+
+        # Use noise to generate fake data, then pass fake data through discriminator
+        noise = torch.randn(real_images.size(0), params['NOISE_DIMENSIONS'], device=device)
+        fake_images = generator_model(noise)
+        fake_labels = torch.zeros(real_images.size(0), 1, device=device)
+        fake_outputs = discriminator_model(fake_images.detach())
+        fake_loss = criterion(fake_outputs, fake_labels)
+        fake_loss.backward()
+        # Update weights in discriminator
+        discriminator_optimizer.step()
+
+        # Use the same noise to generate same fake data, then update generator
+        generator_optimizer.zero_grad()
+        fake_labels = torch.ones(real_images.size(0), 1, device=device)
+        fake_outputs = discriminator_model(fake_images)
+        gen_loss = criterion(fake_outputs, fake_labels)
+        gen_loss.backward()
+        # Update weights in generator
+        generator_optimizer.step()
+
+        # Cumulate loss
+        cumulative_gen_loss += gen_loss.item()
+        cumulative_dis_loss += real_loss.item() + fake_loss.item()
+
+        if (batch_index + 1) % 100 == 0 or batch_index + 1 == len(train_loader):
+            print(f'Epoch [{epoch+1}/{params["NUM_EPOCHS"]}], Step [{batch_index+1}/{len(train_loader)}], '
+                  f'Discriminator Loss: {real_loss.item() + fake_loss.item():.4f}, '
+                  f'Generator Loss: {gen_loss.item():.4f}')
+
+    discriminator_losses.append([epoch, cumulative_dis_loss])
+    generator_losses.append([epoch, cumulative_gen_loss])
+
+discriminator_losses = np.array(discriminator_losses)
+generator_losses = np.array(generator_losses)
+
+fig, ax = plt.subplots(nrows=1, ncols=1)
+ax.plot(discriminator_losses[:, 0].reshape(-1), discriminator_losses[:, 1].reshape(-1), label='Discriminator')
+ax.plot(generator_losses[:, 0].reshape(-1), generator_losses[:, 1].reshape(-1), label='Generator')
+plt.legend()
+plt.show()
+
+test_noise = torch.randn(16, params["NOISE_DIMENSIONS"], device=device)
+generate_and_save_images(generator_model, params["NUM_EPOCHS"], test_noise, params, output_folder)
