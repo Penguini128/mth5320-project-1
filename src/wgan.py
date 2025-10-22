@@ -22,23 +22,24 @@ params = {
 
     'TRAINING_DATASET' : 'sprite',
     'TRAINING_SPRITE_TYPE' : 'grayscale',
-    'TRAINING_SPRITE_CATEGORY' : 'food',
+    'TRAINING_SPRITE_CATEGORY' : ['food', 'people', 'side_profiles', 'items'],
     'TRAINING_UNIQUES_ONLY' : True,
 
-    'GENERATOR_ADAM_LEARNING_RATE' : 0.0005,
-    'GENERATOR_ADAM_BETAS' : (0.0, 0.999),
+    'GENERATOR_LEARNING_RATE' : 0.0005,
+    'GENERATOR_ADAM_BETAS' : (0.0, 0.98),
     'SHARPEN_GENERATOR_OUTPUT' : False,
     'SHARPEN_FACTOR' : 8,
 
-    'DISCRIMINATOR_ADAM_LEARNING_RATE': 0.0001,
-    'DISCRIMINATOR_ADAM_BETAS': (0.0, 0.999),
+    'DISCRIMINATOR_LEARNING_RATE': 0.0001,
+    'DISCRIMINATOR_ADAM_BETAS': (0.0, 0.98),
 
     'NUM_EPOCHS' : 2048*10,
     'BATCH_SIZE' : 2048,
-    'CRITIC_CYCLES' : 3,
+    'CRITIC_CYCLES' : 5,
 
     'GENERATE_EXAMPLES_DIMS' : (8, 8),
-    'SAVE_EXAMPLES_PER_EPOCHS' : 512
+    'SAVE_EXAMPLES_PER_EPOCHS' : 128,
+    'SAMPLE_CURVE_PER_EPOCHS' : 64
 }
 
 """
@@ -89,12 +90,12 @@ discriminator_model = DiscriminatorModel(
 
 generator_optimizer = optim.Adam(
     generator_model.parameters(),
-    lr=params['GENERATOR_ADAM_LEARNING_RATE'],
+    lr=params['GENERATOR_LEARNING_RATE'],
     betas=params['GENERATOR_ADAM_BETAS']
 )
 discriminator_optimizer = optim.Adam(
     discriminator_model.parameters(),
-    lr=params['DISCRIMINATOR_ADAM_LEARNING_RATE'],
+    lr=params['DISCRIMINATOR_LEARNING_RATE'],
     betas=params['DISCRIMINATOR_ADAM_BETAS']
 )
 
@@ -137,12 +138,13 @@ for epoch in range(params['NUM_EPOCHS']):
 
             # Use noise to generate fake data, then pass fake data through discriminator
             noise = torch.randn(real_images.size(0), params['NOISE_DIMENSIONS'], device=device)
-            fake_images = generator_model(noise)
-            fake_outputs = discriminator_model(fake_images.detach())
+            fake_images = generator_model(noise).detach()
+            fake_outputs = discriminator_model(fake_images)
             critic_loss = torch.mean(fake_outputs) - torch.mean(real_outputs)
             critic_loss.backward()
             # Update weights in discriminator
             discriminator_optimizer.step()
+
             for p in discriminator_model.parameters():
                 p.data.clamp_(-0.01, 0.01)
 
@@ -150,6 +152,8 @@ for epoch in range(params['NUM_EPOCHS']):
 
         # Use the same noise to generate same fake data, then update generator
         generator_optimizer.zero_grad()
+        noise = torch.randn(real_images.size(0), params['NOISE_DIMENSIONS'], device=device)
+        fake_images = generator_model(noise)
         fake_outputs = discriminator_model(fake_images)
         gen_loss = -torch.mean(fake_outputs)
         gen_loss.backward()
@@ -169,8 +173,9 @@ for epoch in range(params['NUM_EPOCHS']):
         generate_and_save_images(generator_model, epoch, test_noise, params, output_folder)
         generator_model.train()
 
-    discriminator_losses.append([epoch, cumulative_dis_loss])
-    generator_losses.append([epoch, cumulative_gen_loss])
+    if (epoch + 1) % params['SAMPLE_CURVE_PER_EPOCHS'] == 0:
+        discriminator_losses.append([epoch, cumulative_dis_loss])
+        generator_losses.append([epoch, cumulative_gen_loss])
 
 discriminator_losses = np.array(discriminator_losses)
 generator_losses = np.array(generator_losses)

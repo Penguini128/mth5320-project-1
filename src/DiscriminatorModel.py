@@ -24,3 +24,5 @@ class DiscriminatorModel(nn.Module):
 
     def forward(self, x):
         return self.main(x)
+
+

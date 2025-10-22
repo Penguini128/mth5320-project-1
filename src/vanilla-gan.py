@@ -13,28 +13,32 @@ import numpy as np
 from GeneratorModel import GeneratorModel
 from DiscriminatorModel import DiscriminatorModel
 from helpers import *
+import os
 
 """
 Define constants
 """
 params = {
-    'NOISE_DIMENSIONS' : 16,
+    'NOISE_DIMENSIONS' : 64,
 
     'TRAINING_DATASET' : 'sprite',
-    'TRAINING_SPRITE_TYPE' : 'grayscale',
-    'TRAINING_SPRITE_CATEGORY' : 'food',
+    'TRAINING_SPRITE_TYPE' : 'rgb',
+    'TRAINING_SPRITE_CATEGORY' : 'people',
     'TRAINING_UNIQUES_ONLY' : True,
 
-    'GENERATOR_ADAM_LEARNING_RATE' : 0.002,
-    'GENERATOR_ADAM_BETAS' : (0.5, 0.999),
+    'GENERATOR_ADAM_LEARNING_RATE' : 0.0005,
+    'GENERATOR_ADAM_BETAS' : (0.9, 0.999),
     'SHARPEN_GENERATOR_OUTPUT' : False,
-    'SHARPEN_FACTOR' : 4,
+    'SHARPEN_FACTOR' : 8,
 
-    'DISCRIMINATOR_ADAM_LEARNING_RATE': 0.00001,
-    'DISCRIMINATOR_ADAM_BETAS': (0.5, 0.999),
+    'DISCRIMINATOR_ADAM_LEARNING_RATE': 0.0001,
+    'DISCRIMINATOR_ADAM_BETAS': (0.9, 0.999),
 
     'NUM_EPOCHS' : 2048*10,
-    'BATCH_SIZE' : 1024
+    'BATCH_SIZE' : 2048,
+
+    'GENERATE_EXAMPLES_DIMS' : (8, 8),
+    'SAVE_EXAMPLES_PER_EPOCHS' : 512
 }
 
 """
@@ -108,6 +112,9 @@ Execute Training Loop
 discriminator_losses = []
 generator_losses = []
 
+test_noise = torch.randn(int(np.prod(params['GENERATE_EXAMPLES_DIMS'])), params["NOISE_DIMENSIONS"],
+                                 device=device)
+
 # Loop for specified number of epochs
 for epoch in range(params['NUM_EPOCHS']):
     cumulative_gen_loss = 0
@@ -152,6 +159,10 @@ for epoch in range(params['NUM_EPOCHS']):
                   f'Discriminator Loss: {real_loss.item() + fake_loss.item():.4f}, '
                   f'Generator Loss: {gen_loss.item():.4f}')
 
+        if (epoch + 1) % params['SAVE_EXAMPLES_PER_EPOCHS'] == 0 or epoch + 1 == params['NUM_EPOCHS']:
+            generate_and_save_images(generator_model, epoch, test_noise, params, output_folder)
+            generator_model.train()
+
     discriminator_losses.append([epoch, cumulative_dis_loss])
     generator_losses.append([epoch, cumulative_gen_loss])
 
@@ -162,7 +173,5 @@ fig, ax = plt.subplots(nrows=1, ncols=1)
 ax.plot(discriminator_losses[:, 0].reshape(-1), discriminator_losses[:, 1].reshape(-1), label='Discriminator')
 ax.plot(generator_losses[:, 0].reshape(-1), generator_losses[:, 1].reshape(-1), label='Generator')
 plt.legend()
+plt.savefig(os.path.join(output_folder, 'loss_plot.png'))
 plt.show()
-
-test_noise = torch.randn(16, params["NOISE_DIMENSIONS"], device=device)
-generate_and_save_images(generator_model, params["NUM_EPOCHS"], test_noise, params, output_folder)

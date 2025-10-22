@@ -15,7 +15,7 @@ def load_pixel_art_training_data(sprite_type, sprite_category):
     labels = np.load('../data/sprites_labels.npy')
     int_labels = np.argmax(labels, axis=1)
 
-    return {
+    data = {
         'rgb' : {
             'people' : sprites[int_labels == 0],
             'creatures' : sprites[int_labels == 1],
@@ -32,7 +32,17 @@ def load_pixel_art_training_data(sprite_type, sprite_category):
             'side_profiles': grayscale_sprites[int_labels == 4],
             'all': grayscale_sprites
         }
-    }[sprite_type][sprite_category]
+    }
+
+    if isinstance(sprite_category, str):
+        return data[sprite_type][sprite_category]
+
+    gathered_data = []
+    for category in sprite_category:
+        found = data[sprite_type][category][:]
+        np.random.shuffle(found)
+        gathered_data.extend(found[:128])
+    return gathered_data
 
 def load_mnist_training_data():
     mnist_transform = transforms.Compose([
